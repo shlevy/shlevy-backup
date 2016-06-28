@@ -1,6 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 module Main where
 
+import System.Environment (getArgs)
 import System.FilePath ((</>))
 import System.Posix.Directory ( DirStream
                               , openDirStream
@@ -58,9 +59,10 @@ handleOutput chan = do
 
 main :: IO ()
 main = do
+  [dir] <- getArgs
   chan <- newTChanIO
   printThread <- async $ handleOutput chan
-  op <- async $ walkDir "/home/shlevy/backed-up" chan
+  op <- async $ walkDir dir chan
   wait op
   atomically $ writeTChan chan ""
   wait printThread
