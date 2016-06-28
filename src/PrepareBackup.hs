@@ -15,7 +15,7 @@ import System.Posix.Files ( getSymbolicLinkStatus
                           , isDirectory
                           )
 import Control.Exception (bracket)
-import Control.Concurrent.Async (Async, async, wait)
+import Control.Concurrent.Async (async, wait)
 import Control.Concurrent.STM ( TChan
                               , writeTChan
                               , atomically
@@ -48,13 +48,11 @@ entType path stat
   | otherwise = return Unknown
 
 handleEnt :: FilePath -> TChan FilePath -> IO ()
-handleEnt path chan = do
-  stat <- getSymbolicLinkStatus path
-  entType path stat >>= \case
-    GitDir -> atomically $ writeTChan chan ("git: " ++ path)
-    Dir -> walkDir path chan
-    Reg -> atomically $ writeTChan chan path
-    Unknown -> error "Unknown!"
+handleEnt path chan = getSymbolicLinkStatus path >>= entType path >>= \case
+  GitDir -> atomically $ writeTChan chan ("git: " ++ path)
+  Dir -> walkDir path chan
+  Reg -> atomically $ writeTChan chan path
+  Unknown -> error "Unknown!"
 
 handleOutput :: TChan FilePath -> IO ()
 handleOutput chan = do
@@ -70,5 +68,5 @@ main = do
   printThread <- async $ handleOutput chan
   op <- async $ walkDir dir chan
   wait op
-  atomically $ writeTChan chan ""
+  atomically $ writeTChan chan []
   wait printThread
