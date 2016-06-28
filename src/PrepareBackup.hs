@@ -7,10 +7,19 @@ import System.Posix.Directory ( DirStream
                               , closeDirStream
                               , readDirStream
                               )
-import System.Posix.Files (getSymbolicLinkStatus, FileStatus, isRegularFile, isDirectory)
+import System.Posix.Files ( getSymbolicLinkStatus
+                          , FileStatus
+                          , isRegularFile
+                          , isDirectory
+                          )
 import Control.Exception (bracket)
 import Control.Concurrent.Async (Async, async, wait)
-import Control.Concurrent.STM (TChan, writeTChan, atomically, readTChan, newTChanIO)
+import Control.Concurrent.STM ( TChan
+                              , writeTChan
+                              , atomically
+                              , readTChan
+                              , newTChanIO
+                              )
 
 withDirStream :: FilePath -> (DirStream -> IO a) -> IO a
 withDirStream path = bracket (openDirStream path) closeDirStream
@@ -50,8 +59,8 @@ handleOutput chan = do
 main :: IO ()
 main = do
   chan <- newTChanIO
-  op <- async $ handleEnt "/home/shlevy/backed-up" chan
   printThread <- async $ handleOutput chan
+  op <- async $ handleEnt "/home/shlevy/backed-up" chan
   wait op
   atomically $ writeTChan chan ""
   wait printThread
