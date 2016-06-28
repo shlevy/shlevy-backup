@@ -8,6 +8,7 @@ import System.Posix.Directory ( DirStream
                               , closeDirStream
                               , readDirStream
                               )
+import System.Directory (doesDirectoryExist)
 import System.Posix.Files ( getSymbolicLinkStatus
                           , FileStatus
                           , isRegularFile
@@ -36,19 +37,24 @@ walkDir dir chan = withDirStream dir (dirLoop [])
         op <- async $ handleEnt (dir </> ent) chan
         dirLoop (op : ops) ds
 
-data EntType = Dir | Reg | Unknown
+data EntType = GitDir | Dir | Reg | Unknown
 
-entType :: FileStatus -> EntType
-entType stat
-  | (isRegularFile stat) = Reg
-  | (isDirectory stat) = Dir
-  | otherwise = Unknown
+entType :: FilePath -> FileStatus -> IO EntType
+entType path stat
+  | (isRegularFile stat) = return Reg
+  | (isDirectory stat) = do
+      exists <- doesDirectoryExist $ path </> ".git"
+      return $ if exists then GitDir else Dir
+  | otherwise = return Unknown
 
 handleEnt :: FilePath -> TChan FilePath -> IO ()
-handleEnt path chan = fmap entType (getSymbolicLinkStatus path) >>= \case
-  Dir -> walkDir path chan
-  Reg -> atomically $ writeTChan chan path
-  Unknown -> error "Unknown!"
+handleEnt path chan = do
+  stat <- getSymbolicLinkStatus path
+  entType path stat >>= \case
+    GitDir -> atomically $ writeTChan chan ("git: " ++ path)
+    Dir -> walkDir path chan
+    Reg -> atomically $ writeTChan chan path
+    Unknown -> error "Unknown!"
 
 handleOutput :: TChan FilePath -> IO ()
 handleOutput chan = do
