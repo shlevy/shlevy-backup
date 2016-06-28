@@ -24,11 +24,11 @@ import Control.Concurrent.STM ( TChan
 withDirStream :: FilePath -> (DirStream -> IO a) -> IO a
 withDirStream path = bracket (openDirStream path) closeDirStream
 
-walkDir :: FilePath -> TChan FilePath -> IO [Async ()]
+walkDir :: FilePath -> TChan FilePath -> IO ()
 walkDir dir chan = withDirStream dir (dirLoop [])
   where
     dirLoop ops ds = readDirStream ds >>= \case
-      [] -> return ops
+      [] -> mapM_ wait ops
       "." -> dirLoop ops ds
       ".." -> dirLoop ops ds
       ent -> do
@@ -45,7 +45,7 @@ entType stat
 
 handleEnt :: FilePath -> TChan FilePath -> IO ()
 handleEnt path chan = fmap entType (getSymbolicLinkStatus path) >>= \case
-  Dir -> walkDir path chan >>= mapM_ wait
+  Dir -> walkDir path chan
   Reg -> atomically $ writeTChan chan path
   Unknown -> error "Unknown!"
 
@@ -60,7 +60,7 @@ main :: IO ()
 main = do
   chan <- newTChanIO
   printThread <- async $ handleOutput chan
-  op <- async $ handleEnt "/home/shlevy/backed-up" chan
+  op <- async $ walkDir "/home/shlevy/backed-up" chan
   wait op
   atomically $ writeTChan chan ""
   wait printThread
