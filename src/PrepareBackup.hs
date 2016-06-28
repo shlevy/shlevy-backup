@@ -2,7 +2,7 @@
 module Main where
 
 import System.Environment (getArgs)
-import System.FilePath ((</>))
+import System.FilePath ((</>), takeDirectory, takeFileName)
 import System.Posix.Directory ( DirStream
                               , openDirStream
                               , closeDirStream
@@ -22,6 +22,14 @@ import Control.Concurrent.STM ( TChan
                               , readTChan
                               , newTChanIO
                               )
+import System.Process ( createProcess
+                      , proc
+                      , CreateProcess(..)
+                      , StdStream(..)
+                      , waitForProcess
+                      )
+import System.IO (hGetChar, Handle, hClose, hGetBuf)
+import Foreign.Marshal.Alloc (allocaBytes)
 
 withDirStream :: FilePath -> (DirStream -> IO a) -> IO a
 withDirStream path = bracket (openDirStream path) closeDirStream
@@ -37,11 +45,42 @@ walkDir dir chan = withDirStream dir (dirLoop [])
         op <- async $ handleEnt (dir </> ent) chan
         dirLoop (op : ops) ds
 
-data EntType = GitDir | Dir | Reg | Unknown
+data SrcStatus = Unmodified | Modified | Missing deriving Show
+
+data EntType = GitDir | Dir | Src SrcStatus | Reg | Unknown
+
+withSrcProcess :: FilePath -> FilePath -> (Handle -> IO a) -> IO a
+withSrcProcess file dir run = bracket open close run'
+  where
+    open = createProcess $ (proc "src" [ "status", "./" ++ file ]) { cwd = Just dir
+                                                           , std_out = CreatePipe
+                                                           }
+    drain out size buf = do
+      count <- hGetBuf out buf size
+      if count < size
+         then return ()
+         else drain out size buf
+    close (_, Just out, _, procHandle) = do
+      let size = 4096
+      allocaBytes size (drain out size)
+      hClose out
+      waitForProcess procHandle
+    run' (_, Just out, _, _) = run out
 
 entType :: FilePath -> FileStatus -> IO EntType
 entType path stat
-  | (isRegularFile stat) = return Reg
+  | (isRegularFile stat) = do
+      let dir = takeDirectory path
+      let file = takeFileName path
+      doesDirectoryExist (dir </> ".src") >>= \case
+        True -> withSrcProcess file dir $ \out -> hGetChar out >>= \case
+          '?' -> return Reg
+          'I' -> return Reg
+          'M' -> return $ Src Modified
+          '!' -> return $ Src Missing
+          '=' -> return $ Src Unmodified
+          _ -> error "bad src status"
+        False -> return Reg
   | (isDirectory stat) = do
       exists <- doesDirectoryExist $ path </> ".git"
       return $ if exists then GitDir else Dir
@@ -51,6 +90,7 @@ handleEnt :: FilePath -> TChan FilePath -> IO ()
 handleEnt path chan = getSymbolicLinkStatus path >>= entType path >>= \case
   GitDir -> atomically $ writeTChan chan ("git: " ++ path)
   Dir -> walkDir path chan
+  Src stat -> atomically $ writeTChan chan ("src: " ++ show stat ++ " " ++ path)
   Reg -> atomically $ writeTChan chan path
   Unknown -> error "Unknown!"
 
